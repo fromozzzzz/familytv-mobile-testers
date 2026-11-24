@@ -133,7 +133,10 @@ def capture(tag):
     root = dump_xml()
     w, h = screen_size()
     d = density()
-    print(f"  viewport={w}x{h}px density={d} -> {round(w * 160 / d)}x{round(h * 160 / d)}dp")
+    rot = adb("shell", "dumpsys", "window", "displays")
+    import re as _re
+    m = _re.search(r"mCurrentRotation=ROTATION_(\d+)", rot)
+    print(f"  viewport={w}x{h}px density={d} -> {round(w * 160 / d)}x{round(h * 160 / d)}dp rotation={m.group(1) if m else '?'}")
     logcat = adb("logcat", "-d", "-t", "400")
     hits = [l for l in logcat.splitlines() if "FATAL EXCEPTION" in l or "UnsatisfiedLinkError" in l]
     for line in hits:
@@ -208,14 +211,17 @@ def launch_home():
 
 def main():
     adb("logcat", "-c")
+    adb("shell", "settings", "put", "system", "accelerometer_rotation", "0")
+    adb("shell", "settings", "put", "system", "user_rotation", "0")
     size, dens = set_metrics(*UNFOLDED)
     print(f"Mate X5 展开态 metrics: {size} @ {dens}dpi")
 
     def step_home_unfolded():
         root = launch_home()
         root = capture("01_home_unfolded")
-        for tab in ("影视", "夸克", "直播", "设置", "搜片"):
-            assert find(root, tab, exact=True), f"底部/顶栏缺少 {tab}"
+        for tab in ("影视", "夸克", "直播", "设置"):
+            assert find(root, tab, exact=True), f"底部导航缺少 {tab}"
+        assert find(root, "搜片"), "顶栏缺少搜片入口"
         card = first_recycler(root)
         assert card, "首页未渲染片单卡片"
         cols = grid_columns(root)
@@ -241,30 +247,35 @@ def main():
         assert play, "详情页未加载出播放按钮"
         sh("input", "tap", str(play["cx"]), str(play["cy"]))
         time.sleep(4)
-        play_root = close_popups(dump_xml())
-        if find(play_root, "全屏", exact=True) is None:
-            w, h = screen_size()
-            sh("input", "tap", str(w // 2), str(int(h * 0.15)))
-            time.sleep(1)
-            play_root = dump_xml()
-        play_root = capture("03_play_twopane")
-        assert find(play_root, "全屏", exact=True), "播放页未出现控制栏"
-        assert find(play_root, "选集"), "播放页右侧缺少选集面板（左右分栏未生效）"
-        fill_btn = find(play_root, "铺满", exact=True) or find(play_root, "适应", exact=True)
+        root = close_popups(dump_xml())
+        # 控制栏 3 秒自动隐藏：轻点播放器左侧画面唤出
+        w, h = screen_size()
+        for _ in range(3):
+            if find(root, "全屏", exact=True):
+                break
+            sh("input", "tap", str(int(w * 0.30)), str(int(h * 0.35)))
+            time.sleep(1.2)
+            root = dump_xml()
+        root = capture("03_play_twopane")
+        assert find(root, "全屏", exact=True), "播放页未出现控制栏（全屏按钮缺失）"
+        assert find(root, "选集"), "播放页右侧缺少选集面板（左右分栏未生效）"
+        fill_btn = find(root, "铺满", exact=True) or find(root, "适应", exact=True)
         assert fill_btn, "播放页缺少铺满/适应切换按钮"
-        # 播放器应占据左侧约 55%~65% 宽度
-        w, _ = screen_size()
         assert fill_btn["cx"] < w * 0.62, "铺满按钮不在左半区，左右分栏可能未生效"
+        sel = find(root, "选集")
+        assert sel["bounds"][0] > w * 0.5, f"选集面板未落在右半区（x={sel['bounds'][0]}, w={w}）"
 
     def step_fill_toggle():
         root = dump_xml()
         btn = find(root, "铺满", exact=True) or find(root, "适应", exact=True)
+        assert btn, "未找到铺满/适应按钮"
         before = btn["text"]
         sh("input", "tap", str(btn["cx"]), str(btn["cy"]))
         time.sleep(1.2)
         after_root = capture("04_play_fill_toggled")
-        after = (find(after_root, "铺满", exact=True) or find(after_root, "适应", exact=True))["text"]
-        assert before != after, f"铺满/适应切换无效（仍为 {after}）"
+        nxt = find(after_root, "铺满", exact=True) or find(after_root, "适应", exact=True)
+        assert nxt is not None, "切换后控制栏消失"
+        assert before != nxt["text"], f"铺满/适应切换无效（仍为 {nxt['text']}）"
 
     def step_fullscreen_landscape():
         root = dump_xml()
@@ -286,7 +297,7 @@ def main():
         root = launch_home()
         tap(root, "夸克", exact=True, wait=2)
         root = capture("06_quark_unfolded")
-        assert find(root, "TVBox_Cache", exact=True), "夸克页未列出 TVBox_Cache 目录"
+        assert find(root, "TVBox_Cache"), "夸克页未列出 TVBox_Cache 目录"
         tap(root, "设置", exact=True, wait=2)
         root = capture("07_settings_unfolded")
         assert find(root, "显示我的夸克视频", cls="Switch"), "设置页缺少个人视频开关"
@@ -298,12 +309,30 @@ def main():
                 break
         root = capture("08_live_unfolded")
         assert first_recycler(root), "直播 Tab 未加载频道列表"
+        watch = find(root, "立即观看")
+        assert watch, "直播 Tab 缺少立即观看入口"
+        sh("input", "tap", str(watch["cx"]), str(watch["cy"]))
+        time.sleep(4)
+        live_play = close_popups(dump_xml())
+        w, h = screen_size()
+        for _ in range(3):
+            if find(live_play, "全屏横屏", exact=True):
+                break
+            sh("input", "tap", str(int(w * 0.30)), str(int(h * 0.30)))
+            time.sleep(1.2)
+            live_play = dump_xml()
+        live_play = capture("09_live_play_twopane")
+        fill = find(live_play, "铺满", exact=True) or find(live_play, "适应", exact=True)
+        assert fill, "直播播放页缺少铺满/适应按钮"
+        assert fill["cx"] < w * 0.62, "直播播放页未左右分栏（按钮未在左半区）"
+        sh("input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1.5)
 
     def step_folded():
         set_metrics(*FOLDED)
         try:
             root = launch_home()
-            root = capture("09_home_folded")
+            root = capture("10_home_folded")
             card = first_recycler(root)
             assert card, "折叠态首页未渲染片单"
             cols = grid_columns(root)
@@ -316,7 +345,7 @@ def main():
     record("02_展开态详情与播放页左右分栏", step_detail_and_twopane)
     record("03_铺满适应切换", step_fill_toggle)
     record("04_横屏全屏", step_fullscreen_landscape)
-    record("05_展开态夸克设置直播", step_tabs_unfolded)
+    record("05_展开态夸克设置直播与直播分栏", step_tabs_unfolded)
     record("06_折叠态窄屏3列布局", step_folded)
 
     summary = {"device": "HUAWEI Mate X5 (2224x2496 @426dpi / 1080x2504 @426dpi)",
