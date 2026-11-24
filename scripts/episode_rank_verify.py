@@ -234,7 +234,8 @@ def step_series_ranking():
     seen = []
     for _ in range(6):
         for t in quark_titles(root):
-            if t not in seen and "stranger" not in t.lower() and t != HOT_KEYWORD:
+            # 排除与输入完全相同的词（历史 chip 里就是关键词本身）
+            if t not in seen and t != "stranger" and t != HOT_KEYWORD:
                 seen.append(t)
         sh("input", "swipe", "540", "1700", "540", "600", "350")
         time.sleep(1)
