@@ -139,10 +139,10 @@ def capture(tag):
     print(f"  viewport={w}x{h}px density={d} -> {round(w * 160 / d)}x{round(h * 160 / d)}dp rotation={m.group(1) if m else '?'}")
     for line in adb("logcat", "-d", "-s", "MATEX5").splitlines():
         print("  MATEX5 " + line.strip())
-    top = adb("shell", "dumpsys", "activity", "activities")
+    win = adb("shell", "dumpsys", "window", "windows")
     import re as _re2
-    mt = _re2.search(r"mResumedActivity: ActivityRecord\{[^}]* ([\w.]+/[\w.]+)", top)
-    print("  TOP " + (mt.group(1) if mt else "?"))
+    mf = _re2.search(r"mCurrentFocus=Window\{[^}]* ([^}]*)\}", win)
+    print("  FOCUS " + (mf.group(1) if mf else "?"))
     hits = []
     logcat = adb("logcat", "-d", "-t", "2000")
     for line in logcat.splitlines():
@@ -286,7 +286,13 @@ def main():
         assert before != nxt["text"], f"铺满/适应切换无效（仍为 {nxt['text']}）"
 
     def step_fullscreen_landscape():
+        w, h = screen_size()
         root = dump_xml()
+        for _ in range(3):
+            if find(root, "全屏", exact=True):
+                break
+            sh("input", "tap", str(int(w * 0.30)), str(int(h * 0.35)))
+            root = dump_xml()
         btn = find(root, "全屏", exact=True)
         assert btn, "未找到全屏按钮"
         sh("input", "tap", str(btn["cx"]), str(btn["cy"]))
@@ -323,10 +329,9 @@ def main():
         time.sleep(4)
         live_play = close_popups(dump_xml())
         w, h = screen_size()
-        for _ in range(4):
-            if find(live_play, "全屏横屏", exact=True):
-                break
+        if find(live_play, "全屏横屏", exact=True) is None:
             sh("input", "tap", str(int(w * 0.30)), str(int(h * 0.30)))
+            time.sleep(1)
             live_play = dump_xml()
         live_play = capture("09_live_play_twopane")
         fill = find(live_play, "铺满", exact=True) or find(live_play, "适应", exact=True)
