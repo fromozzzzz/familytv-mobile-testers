@@ -176,7 +176,7 @@ def main():
 
     def bottom_texts(r):
         return [it["text"] for it in nodes(r)
-                if it["text"] and it["cy"] > h * 0.90]
+                if it["text"] and it["cy"] > h * 0.85]
 
     def step_bottom_nav():
         nonlocal root
