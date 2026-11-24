@@ -137,10 +137,12 @@ def capture(tag):
     import re as _re
     m = _re.search(r"mCurrentRotation=ROTATION_(\d+)", rot)
     print(f"  viewport={w}x{h}px density={d} -> {round(w * 160 / d)}x{round(h * 160 / d)}dp rotation={m.group(1) if m else '?'}")
-    logcat = adb("logcat", "-d", "-t", "800")
-    for line in logcat.splitlines():
-        if "MATEX5" in line:
-            print("  LOG " + line.strip())
+    for line in adb("logcat", "-d", "-s", "MATEX5").splitlines():
+        print("  MATEX5 " + line.strip())
+    top = adb("shell", "dumpsys", "activity", "activities")
+    import re as _re2
+    mt = _re2.search(r"mResumedActivity: ActivityRecord\{[^}]* ([\w.]+/[\w.]+)", top)
+    print("  TOP " + (mt.group(1) if mt else "?"))
     hits = [l for l in logcat.splitlines() if "FATAL EXCEPTION" in l or "UnsatisfiedLinkError" in l]
     for line in hits:
         CRASHES.append(f"[{tag}] {line.strip()}")
@@ -253,11 +255,10 @@ def main():
         root = close_popups(dump_xml())
         # 控制栏 3 秒自动隐藏：轻点播放器左侧画面唤出
         w, h = screen_size()
-        for _ in range(3):
+        for _ in range(4):
             if find(root, "全屏", exact=True):
                 break
             sh("input", "tap", str(int(w * 0.30)), str(int(h * 0.35)))
-            time.sleep(1.2)
             root = dump_xml()
         root = capture("03_play_twopane")
         assert find(root, "全屏", exact=True), "播放页未出现控制栏（全屏按钮缺失）"
@@ -318,11 +319,10 @@ def main():
         time.sleep(4)
         live_play = close_popups(dump_xml())
         w, h = screen_size()
-        for _ in range(3):
+        for _ in range(4):
             if find(live_play, "全屏横屏", exact=True):
                 break
             sh("input", "tap", str(int(w * 0.30)), str(int(h * 0.30)))
-            time.sleep(1.2)
             live_play = dump_xml()
         live_play = capture("09_live_play_twopane")
         fill = find(live_play, "铺满", exact=True) or find(live_play, "适应", exact=True)
@@ -332,6 +332,7 @@ def main():
         time.sleep(1.5)
 
     def step_folded():
+        sh("am", "force-stop", PKG)
         set_metrics(*FOLDED)
         try:
             root = launch_home()
