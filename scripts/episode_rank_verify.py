@@ -177,13 +177,24 @@ def quark_titles(root):
 
 def step_series_ranking():
     sh("am", "force-stop", PKG)
-    sh("am", "start", "-n", SEARCH, "--es", "keyword", HOT_KEYWORD)
-    root = None
-    for _ in range(15):
-        time.sleep(2)
-        root = close_popups(dump_xml())
-        if find(root, "夸克网盘"):
+    ade = sh("settings", "get", "global", "window_animation_scale").strip()
+    launched = False
+    for attempt in range(3):
+        sh("am", "start", "-n", SEARCH, "--es", "keyword", HOT_KEYWORD)
+        root = None
+        for _ in range(15):
+            time.sleep(2)
+            root = close_popups(dump_xml())
+            if find(root, "夸克网盘"):
+                launched = True
+                break
+        if launched:
             break
+        print(f"  搜索页第{attempt+1}次未起来，重试")
+        sh("input", "keyevent", "4")
+        time.sleep(2)
+    if not launched:
+        raise AssertionError("搜索页 3 次尝试都没能打开")
     for _ in range(25):
         m = find(root, "夸克网盘 (")
         if m and int(re.search(r"\((\d+)\)", m["text"]).group(1)) >= 5:
