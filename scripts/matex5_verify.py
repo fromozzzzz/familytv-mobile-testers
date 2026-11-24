@@ -137,7 +137,10 @@ def capture(tag):
     import re as _re
     m = _re.search(r"mCurrentRotation=ROTATION_(\d+)", rot)
     print(f"  viewport={w}x{h}px density={d} -> {round(w * 160 / d)}x{round(h * 160 / d)}dp rotation={m.group(1) if m else '?'}")
-    logcat = adb("logcat", "-d", "-t", "400")
+    logcat = adb("logcat", "-d", "-t", "800")
+    for line in logcat.splitlines():
+        if "MATEX5" in line:
+            print("  LOG " + line.strip())
     hits = [l for l in logcat.splitlines() if "FATAL EXCEPTION" in l or "UnsatisfiedLinkError" in l]
     for line in hits:
         CRASHES.append(f"[{tag}] {line.strip()}")
