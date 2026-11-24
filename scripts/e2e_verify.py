@@ -111,24 +111,52 @@ def record(name, fn):
         print(f"[FAIL] {name}: {e}")
 
 
+def dismiss_system_popups(root=None):
+    """自动关闭 Android 13 首次进入沉浸全屏时的 'Viewing full screen -> Got it' 等系统弹框。"""
+    for _ in range(3):
+        if root is None:
+            root = dump_xml()
+        btn = find_node(root, "Got it", exact=True) or find_node(root, "我知道了", exact=True)
+        if not btn:
+            return root
+        adb("shell", "input", "tap", str(btn["cx"]), str(btn["cy"]))
+        time.sleep(1.0)
+        root = None
+    return dump_xml()
+
+
+def first_recycler_card(root):
+    for rv in root.iter("node"):
+        if "RecyclerView" in (rv.get("class") or ""):
+            children = list(rv)
+            if children:
+                b = re.findall(r"\d+", children[0].get("bounds", ""))
+                if len(b) == 4:
+                    x1, y1, x2, y2 = map(int, b)
+                    if x2 > x1 and y2 > y1:
+                        return {"cx": (x1 + x2) // 2, "cy": (y1 + y2) // 2, "count": len(children)}
+    return None
+
+
 def main():
     adb("logcat", "-c")
-    # 关闭输入法弹窗干扰，授予基础权限
     adb("shell", "am", "start", "-n", f"{PKG}/com.github.tvbox.osc.mobile.MobileHomeActivity")
 
     def step_home():
         root = None
-        for _ in range(10):
+        for _ in range(15):
             time.sleep(2)
-            root = dump_xml()
-            if find_node(root, "家庭影视") and find_node(root, "电影") or find_node(root, "搜片"):
+            root = dismiss_system_popups(dump_xml())
+            if find_node(root, "家庭影视") and first_recycler_card(root) is not None:
                 break
         root = capture("01_home_movies")
         for tab in ("影视", "夸克", "直播", "设置", "搜片"):
             assert_text(root, tab, True)
+        card = first_recycler_card(root)
+        assert card is not None and card["count"] >= 1, "首页未成功渲染出真实影视片单卡片"
 
     def step_quark_default_hidden():
-        root = dump_xml()
+        root = dismiss_system_popups(dump_xml())
         tap_node(root, "夸克", exact=True, wait=2)
         root = capture("02_quark_default_hidden")
         assert_text(root, "默认已隐藏", True)
@@ -161,24 +189,45 @@ def main():
 
     def step_live():
         tap_node(dump_xml(), "直播", exact=True, wait=2)
-        root = capture("05_live_tab")
-        assert_text(root, "电视频道直播", True)
-        tap_node(root, "立即观看", wait=5)
-        root = capture("06_live_play_portrait")
-        assert_text(root, "全屏横屏", True)
-        tap_node(root, "全屏横屏", wait=2)
-        capture("07_live_fullscreen")
-        adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(1)
-        adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(1.5)
-
-    def step_search_pansou():
-        adb("shell", "am", "start", "-n", f"{PKG}/com.github.tvbox.osc.mobile.MobileSearchActivity", "--es", "keyword", "庆余年")
         root = None
         for _ in range(10):
-            time.sleep(2)
             root = dump_xml()
+            card = first_recycler_card(root)
+            if card is not None and card["count"] >= 2:
+                break
+            time.sleep(2)
+        root = capture("05_live_tab")
+        assert_text(root, "电视频道直播", True)
+        live_card = first_recycler_card(root)
+        assert live_card is not None and live_card["count"] >= 2, "直播 Tab 未加载出真实电视频道列表"
+
+        tap_node(root, "立即观看", wait=3)
+        live_play_root = None
+        for _ in range(8):
+            live_play_root = dismiss_system_popups(dump_xml())
+            if find_node(live_play_root, "全屏横屏") and first_recycler_card(live_play_root) is not None:
+                break
+            time.sleep(2)
+        live_play_root = capture("06_live_play_portrait")
+        assert_text(live_play_root, "全屏横屏", True)
+        assert first_recycler_card(live_play_root) is not None, "直播播放页下方选台区未渲染频道"
+        tap_node(live_play_root, "全屏横屏", wait=2.5)
+        dismiss_system_popups()
+        capture("07_live_fullscreen")
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1.5)
+        dismiss_system_popups()
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1.5)
+        dismiss_system_popups()
+
+    def step_search_pansou():
+        dismiss_system_popups()
+        adb("shell", "am", "start", "-n", f"{PKG}/com.github.tvbox.osc.mobile.MobileSearchActivity", "--es", "keyword", "庆余年")
+        root = None
+        for _ in range(12):
+            time.sleep(2)
+            root = dismiss_system_popups(dump_xml())
             n = find_node(root, "夸克网盘 (")
             if n and "(0)" not in n["text"]:
                 break
@@ -186,43 +235,57 @@ def main():
         item = find_node(root, "夸克网盘 · 88VIP原画")
         assert item is not None, "未检索到 PanSou 公开夸克网盘结果"
         adb("shell", "input", "tap", str(item["cx"]), str(item["cy"]))
-        time.sleep(3)
+        time.sleep(4)
+        detail_root = dismiss_system_popups(dump_xml())
         capture("09_quark_share_detail")
+        has_play = find_node(detail_root, "播放") is not None
+        has_no_cookie_hint = find_node(detail_root, "未读取到夸克视频文件") is not None
+        assert has_play or has_no_cookie_hint, "夸克分享详情页既无播放入口也无明确提示"
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(1)
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(1)
 
     def step_detail_and_player():
+        dismiss_system_popups()
         adb("shell", "am", "start", "-n", f"{PKG}/com.github.tvbox.osc.mobile.MobileHomeActivity")
-        time.sleep(3)
-        tap_node(dump_xml(), "影视", exact=True, wait=5)
-        root = dump_xml()
-        card = None
-        for rv in root.iter("node"):
-            if "RecyclerView" in (rv.get("class") or ""):
-                children = list(rv)
-                if children:
-                    b = re.findall(r"\d+", children[0].get("bounds", ""))
-                    if len(b) == 4:
-                        x1, y1, x2, y2 = map(int, b)
-                        if x2 > x1 and y2 > y1:
-                            card = {"cx": (x1 + x2) // 2, "cy": (y1 + y2) // 2}
-                            break
+        time.sleep(2)
+        root = dismiss_system_popups(dump_xml())
+        tap_node(root, "影视", exact=True, wait=2)
+        for _ in range(10):
+            root = dump_xml()
+            card = first_recycler_card(root)
+            if card is not None:
+                break
+            time.sleep(2)
+        card = first_recycler_card(root)
         assert card is not None, "首页未找到可点击影视卡片"
         adb("shell", "input", "tap", str(card["cx"]), str(card["cy"]))
-        time.sleep(5)
-        root = capture("10_movie_detail")
-        play_btn = find_node(root, "播放")
+        detail_root = None
+        for _ in range(8):
+            time.sleep(1.5)
+            detail_root = dismiss_system_popups(dump_xml())
+            if find_node(detail_root, "播放") is not None:
+                break
+        detail_root = capture("10_movie_detail")
+        play_btn = find_node(detail_root, "播放")
         assert play_btn is not None, "详情页未加载出播放按钮"
         adb("shell", "input", "tap", str(play_btn["cx"]), str(play_btn["cy"]))
-        time.sleep(5)
-        root = capture("11_play_portrait")
-        assert_text(root, "全屏", True)
-        tap_node(root, "全屏", exact=True, wait=3)
+        time.sleep(3.5)
+        play_root = dismiss_system_popups(dump_xml())
+        if find_node(play_root, "全屏", exact=True) is None:
+            # 若播放控制栏已自动隐藏，轻点上半区画面唤出控制栏
+            adb("shell", "input", "tap", "540", "320")
+            time.sleep(1)
+            play_root = dump_xml()
+        play_root = capture("11_play_portrait")
+        assert_text(play_root, "全屏", True)
+        tap_node(play_root, "全屏", exact=True, wait=2.5)
+        dismiss_system_popups()
         capture("12_play_landscape")
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(1)
+        time.sleep(1.5)
+        dismiss_system_popups()
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(1)
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
@@ -233,8 +296,14 @@ def main():
             adb("shell", "wm", "size", "1800x2000")
             adb("shell", "wm", "density", "420")
             adb("shell", "am", "start", "-n", f"{PKG}/com.github.tvbox.osc.mobile.MobileHomeActivity")
-            time.sleep(4)
-            capture("13_foldable_unfolded_movies")
+            root = None
+            for _ in range(8):
+                time.sleep(2)
+                root = dismiss_system_popups(dump_xml())
+                if first_recycler_card(root) is not None:
+                    break
+            root = capture("13_foldable_unfolded_movies")
+            assert first_recycler_card(root) is not None, "展开屏首页未显示影视卡片"
         finally:
             adb("shell", "wm", "size", "reset")
             adb("shell", "wm", "density", "reset")
