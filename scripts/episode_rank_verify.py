@@ -260,11 +260,11 @@ def step_series_ranking():
         ih = seen.index(hib[0])
         assert ih < ir, f"原盘REMUX 应排在 4K高码 之后: {hib[0]}@{ih} < {remux[0]}@{ir}"
         checked += 1
-    # 原盘在 1080P 前（降一档但不到最低）
-    if remux and plain:
+    # 原盘降权：REMUX 不得高于完结剧（原盘整体沉底，只允许与“普通无标记”互换）
+    if remux and fin:
         ir = seen.index(remux[0])
-        ip = seen.index(plain[0])
-        assert ir < ip, f"原盘REMUX 应排在 1080P 之前: {remux[0]}@{ir} < {plain[0]}@{ip}"
+        ifin = seen.index(fin[0])
+        assert ifin < ir, f"原盘REMUX 不应排在完结正片前: {fin[0]}@{ifin} < {remux[0]}@{ir}"
         checked += 1
     print("  采样:", seen[:10])
     if checked == 0:
