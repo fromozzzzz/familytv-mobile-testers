@@ -1,0 +1,52 @@
+name: Quark E2E (FamilyTV Mobile)
+
+on:
+  workflow_dispatch:
+    inputs:
+      share_url:
+        description: "夸克分享链接（https://pan.quark.cn/s/xxxx）"
+        required: true
+        default: ""
+      expect_member:
+        description: "期望会员标识"
+        default: "88VIP"
+
+jobs:
+  quark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python deps
+        run: python3 -m pip install -q pillow
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+
+      - name: Quark sync / transfer / play / cleanup
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -o pipefail
+            curl -fsSL --retry 3 -o app.apk https://paseo.uniai.ccwu.cc/tvbox/FamilyTV-Mobile-test.apk
+            adb install -r -g app.apk
+            SHARE_URL="${{ inputs.share_url }}" EXPECT_MEMBER="${{ inputs.expect_member }}" \
+              python3 scripts/quark_e2e.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quark-results
+          path: quark_results/
+          retention-days: 7
