@@ -206,15 +206,19 @@ def quark_count(root):
 
 
 def collect_quark_titles(root, keyword, seen):
-    for it in nodes(root):
-        t = it["text"]
-        if not t or len(t) < 3:
+    """只采集结果 RecyclerView 里的标题，避免把顶部搜索历史词当成结果。"""
+    for rv in root.iter("node"):
+        if "RecyclerView" not in (rv.get("class") or ""):
             continue
-        if any(k in t for k in SKIP_META):
-            continue
-        if t == keyword or t in seen:
-            continue
-        seen[t] = True
+        for it in rv.iter("node"):
+            t = (it.get("text") or "").strip()
+            if not t or len(t) < 3:
+                continue
+            if any(k in t for k in SKIP_META):
+                continue
+            if t == keyword or t in seen:
+                continue
+            seen[t] = True
     return seen
 
 
