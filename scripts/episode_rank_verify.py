@@ -176,23 +176,39 @@ def quark_titles(root):
 
 
 def step_series_ranking():
-    sh("am", "force-stop", PKG)
-    ade = sh("settings", "get", "global", "window_animation_scale").strip()
     launched = False
     for attempt in range(3):
-        sh("am", "start", "-n", SEARCH, "--es", "keyword", HOT_KEYWORD)
-        root = None
-        for _ in range(15):
-            time.sleep(2)
-            root = close_popups(dump_xml())
-            if find(root, "夸克网盘"):
-                launched = True
+        # 走真实用户路径：首页搜索框点进去，预先填关键词
+        root = launch_home()
+        box = find(root, "搜片")
+        if not box:
+            raise AssertionError("首页没有搜索框")
+        sh("input", "tap", str(box["cx"]), str(box["cy"]))
+        time.sleep(3)
+        root = close_popups(dump_xml())
+        et = None
+        for it in nodes(root):
+            if it["cls"] == "android.widget.EditText":
+                et = it
                 break
-        if launched:
+        if et is None:
+            print(f"  第{attempt+1}次没看到输入框，重试")
+            continue
+        # 清空 + 直接输入关键词（中文 adb 输入不可行；用键盘可打的 ASCII 剧名，
+        # PanSou 上宣传格式含更新至N集 / 4K高码 / 1080P remux 等关键特征）
+        sh("input", "text", "stranger things")
+        time.sleep(1.2)
+        go = find(root, "搜索", exact=True)
+        root = dump_xml()
+        go = find(root, "搜索", exact=True)
+        if go:
+            sh("input", "tap", str(go["cx"]), str(go["cy"]))
+        time.sleep(8)
+        root = close_popups(dump_xml())
+        if find(root, "夸克网盘"):
+            launched = True
             break
         print(f"  搜索页第{attempt+1}次未起来，重试")
-        sh("input", "keyevent", "4")
-        time.sleep(2)
     if not launched:
         raise AssertionError("搜索页 3 次尝试都没能打开")
     for _ in range(25):
@@ -203,9 +219,9 @@ def step_series_ranking():
         root = dump_xml()
     capture("04_search_series")
     seen = []
-    for _ in range(4):
+    for _ in range(6):
         for t in quark_titles(root):
-            if t not in seen and t != HOT_KEYWORD:
+            if t not in seen and "stranger" not in t.lower() and t != HOT_KEYWORD:
                 seen.append(t)
         sh("input", "swipe", "540", "1700", "540", "600", "350")
         time.sleep(1)
@@ -216,19 +232,29 @@ def step_series_ranking():
     fin = [t for t in seen if re.search(r"全\d+集", t)]
     remux = [t for t in seen if "REMUX" in t.upper() or "原盘" in t]
     hib = [t for t in seen if "高码" in t]
-    if upd:
-        # 追更优先：更新至 在 完结 前面
-        if fin:
-            iu = seen.index(upd[0])
-            if_ = seen.index(fin[0])
-            assert iu < if_, f"追更未排在完结前: {upd[0]}@{iu} vs {fin[0]}@{if_}"
+    plain = [t for t in seen if "1080p" in t.lower() or "1080P" in t]
+    checked = 0
+    # 追更优先：更新至 在 完结 前面
+    if upd and fin:
+        iu = seen.index(upd[0])
+        if_ = seen.index(fin[0])
+        assert iu < if_, f"追更未排在完结前: {upd[0]}@{iu} vs {fin[0]}@{if_}"
+        checked += 1
+    # 原盘降权：高码 在 REMUX 前
     if remux and hib:
         ir = seen.index(remux[0])
         ih = seen.index(hib[0])
         assert ih < ir, f"原盘REMUX 应排在 4K高码 之后: {hib[0]}@{ih} < {remux[0]}@{ir}"
+        checked += 1
+    # 原盘在 1080P 前（降一档但不到最低）
+    if remux and plain:
+        ir = seen.index(remux[0])
+        ip = seen.index(plain[0])
+        assert ir < ip, f"原盘REMUX 应排在 1080P 之前: {remux[0]}@{ir} < {plain[0]}@{ip}"
+        checked += 1
     print("  采样:", seen[:10])
-    if not upd and not remux:
-        raise AssertionError("采样里既无追更条目也无原盘条目，无法验证排序规则")
+    if checked == 0:
+        raise AssertionError("采样里没有可验证的排序规则样本（既无追更/完结对，也无原盘/高码对）")
 
 
 def main():
