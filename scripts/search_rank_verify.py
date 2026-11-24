@@ -218,11 +218,41 @@ def collect_quark_titles(root, keyword, seen):
     return seen
 
 
+SEARCH = f"{PKG}/com.github.tvbox.osc.mobile.MobileSearchActivity"
+HOT_KEYWORD = "庆余年"
+
+
+def wait_quark(root, minimum=3, seconds=60):
+    """等夸克通道出结果；返回 (root, count)，超时返回 (root, 0)。"""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        n = quark_count(root)
+        if n and n >= minimum:
+            return root, n
+        time.sleep(2)
+        root = dump_xml()
+    return root, quark_count(root) or 0
+
+
 def open_search_with_results():
-    """点豆瓣卡片 → 搜索页；最多换 3 个片名，直到夸克通道有结果。"""
+    """优先直接带关键词打开搜索页（热门片，结果多）；不行再点豆瓣卡片。"""
+    sh("am", "force-stop", PKG)
+    sh("am", "start", "-n", SEARCH, "--es", "keyword", HOT_KEYWORD)
+    root = None
+    for _ in range(12):
+        time.sleep(2)
+        root = close_popups(dump_xml())
+        if find(root, "夸克网盘"):
+            break
+    if root is not None and find(root, "夸克网盘"):
+        root, n = wait_quark(root, minimum=3)
+        if n >= 3:
+            print("  直达搜索:", HOT_KEYWORD, "结果:", n)
+            return root, HOT_KEYWORD
+
     root = launch_home()
     tried = set()
-    for _ in range(3):
+    for _ in range(5):
         cands = [c for c in grid_titles(root) if c[0] not in tried]
         if not cands:
             break
@@ -237,12 +267,9 @@ def open_search_with_results():
             time.sleep(2)
             root = launch_home()
             continue
-        for _ in range(20):
-            n = quark_count(root)
-            if n and n > 0:
-                return root, title
-            time.sleep(2)
-            root = dump_xml()
+        root, n = wait_quark(root, minimum=3)
+        if n >= 3:
+            return root, title
         sh("input", "keyevent", "4")
         time.sleep(2)
         root = launch_home()
@@ -310,7 +337,7 @@ def main():
         bad = [t for t in collected if is_junk(t)]
         assert not bad, f"影视站点结果出现解说/预告: {bad[:5]}"
 
-    record("01_豆瓣卡片进入搜索且夸克通道有结果", step_open)
+    record("01_进入搜索页且夸克通道有足够结果", step_open)
     record("02_过滤解说预告且4K高码优先排序", step_order_and_junk)
     record("03_影视站点通道可切换且无解说", step_cms_tab)
 
