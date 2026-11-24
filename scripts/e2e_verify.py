@@ -148,6 +148,7 @@ def main():
             time.sleep(2)
             root = dismiss_system_popups(dump_xml())
             if find_node(root, "家庭影视") and first_recycler_card(root) is not None:
+                time.sleep(2.5)
                 break
         root = capture("01_home_movies")
         for tab in ("影视", "夸克", "直播", "设置", "搜片"):
@@ -223,7 +224,25 @@ def main():
 
     def step_search_pansou():
         dismiss_system_popups()
-        adb("shell", "am", "start", "-n", f"{PKG}/com.github.tvbox.osc.mobile.MobileSearchActivity", "--es", "keyword", "庆余年")
+        adb("shell", "am", "start", "-n", f"{PKG}/com.github.tvbox.osc.mobile.MobileHomeActivity")
+        time.sleep(1.5)
+        root = dismiss_system_popups(dump_xml())
+        if find_node(root, "搜片") is None:
+            tap_node(root, "影视", exact=True, wait=1.5)
+            root = dump_xml()
+        tap_node(root, "搜片", wait=2)
+        search_root = dismiss_system_popups(dump_xml())
+        edit = None
+        for item in iter_nodes(search_root):
+            if "EditText" in item["cls"]:
+                edit = item
+                break
+        assert edit is not None, "未找到搜索输入框 EditText"
+        adb("shell", "input", "tap", str(edit["cx"]), str(edit["cy"]))
+        time.sleep(0.6)
+        adb("shell", "input", "text", "Avatar")
+        time.sleep(0.6)
+        tap_node(dump_xml(), "搜索", exact=True, wait=2.5)
         root = None
         for _ in range(12):
             time.sleep(2)
