@@ -178,7 +178,7 @@ def quark_titles(root):
 def step_series_ranking():
     launched = False
     for attempt in range(3):
-        # 走真实用户路径：首页搜索框点进去，预先填关键词
+        # 走真实用户路径：首页点搜索框 → 打开 MobileSearchActivity → 在 EditText 里输入 → 点搜索
         root = launch_home()
         box = find(root, "搜片")
         if not box:
@@ -187,23 +187,36 @@ def step_series_ranking():
         time.sleep(3)
         root = close_popups(dump_xml())
         et = None
-        for it in nodes(root):
-            if it["cls"] == "android.widget.EditText":
-                et = it
+        for _ in range(6):
+            for it in nodes(root):
+                if it["cls"] == "android.widget.EditText":
+                    et = it
+                    break
+            if et:
                 break
+            time.sleep(1)
+            root = dump_xml()
         if et is None:
-            print(f"  第{attempt+1}次没看到输入框，重试")
+            print(f"  第{attempt+1}次没看到搜索输入框，重试")
             continue
-        # 清空 + 直接输入关键词（中文 adb 输入不可行；用键盘可打的 ASCII 剧名，
-        # PanSou 上宣传格式含更新至N集 / 4K高码 / 1080P remux 等关键特征）
-        sh("input", "text", "stranger things")
-        time.sleep(1.2)
-        go = find(root, "搜索", exact=True)
+        # 点输入框获得焦点再打字
+        sh("input", "tap", str(et["cx"]), str(et["cy"]))
+        time.sleep(0.8)
+        sh("input", "text", "stranger%sthings" if False else "stranger things")
+        time.sleep(1.5)
         root = dump_xml()
+        # 输入确认在框里后再点「搜索」按钮
+        typed = any("stranger" in (it.get("text") or "").lower()
+                    for it in root.iter("node"))
+        if not typed:
+            print(f"  第{attempt+1}次输入失败（框里没字），重试")
+            continue
         go = find(root, "搜索", exact=True)
-        if go:
-            sh("input", "tap", str(go["cx"]), str(go["cy"]))
-        time.sleep(8)
+        if not go:
+            print(f"  第{attempt+1}次未找到搜索按钮，重试")
+            continue
+        sh("input", "tap", str(go["cx"]), str(go["cy"]))
+        time.sleep(12)
         root = close_popups(dump_xml())
         if find(root, "夸克网盘"):
             launched = True
