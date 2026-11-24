@@ -143,7 +143,11 @@ def capture(tag):
     import re as _re2
     mt = _re2.search(r"mResumedActivity: ActivityRecord\{[^}]* ([\w.]+/[\w.]+)", top)
     print("  TOP " + (mt.group(1) if mt else "?"))
-    hits = [l for l in logcat.splitlines() if "FATAL EXCEPTION" in l or "UnsatisfiedLinkError" in l]
+    hits = []
+    logcat = adb("logcat", "-d", "-t", "2000")
+    for line in logcat.splitlines():
+        if "FATAL EXCEPTION" in line or "UnsatisfiedLinkError" in line:
+            hits.append(line)
     for line in hits:
         CRASHES.append(f"[{tag}] {line.strip()}")
     (OUT / f"{tag}.xml").write_text(
