@@ -33,11 +33,11 @@ CRASHES = []
 
 
 def adb(*args, timeout=90, binary=False):
-    r = subprocess.run(["adb", *args], capture_output=not binary, timeout=timeout)
+    r = subprocess.run(["adb", *args], capture_output=True, timeout=timeout)
     if binary:
-        return r.stdout
-    out = r.stdout.decode("utf-8", "replace") if isinstance(r.stdout, bytes) else (r.stdout or "")
-    return out
+        return r.stdout or b""
+    raw = r.stdout or b""
+    return raw.decode("utf-8", "replace")
 
 
 def sh(*args, timeout=90):
