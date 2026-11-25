@@ -146,7 +146,11 @@ TITLE_HINT_RE = re.compile(r"\((?:19|20)\d{2}\)|4K|高码|更新至|更至|EP\d+
 
 
 def quark_cards(root):
-    """屏幕上可见的夸克 tab 卡片标题行（像片名、带年份/画质字样）。"""
+    """屏幕上可见的夸克 tab 卡片标题行。
+
+    标题行特征：含 (年份) 括号（如「无声的回响 (2026) 4K HQ…」），
+    与 badge 行（「4K · 高码率 · …」以画质开头、以 · 分隔）区分开。
+    """
     out = []
     for it in nodes(root):
         t = it["text"]
@@ -154,11 +158,24 @@ def quark_cards(root):
             continue
         if t in ("豆瓣推荐", "夸克", "收藏", "历史", "搜片", "家庭影视", "电影", "剧集", "动漫综艺"):
             continue
-        if DATE_RE.search(t):
-            continue
         if CARD_DATE_RE.match(t):
             continue
+        # 必须有片名+年份括号才认作标题行（badge 行没有 (2026) 这种片名年份）
+        if not re.search(r"[（(](?:19|20)\d{2}[)）]", t):
+            continue
         if TITLE_HINT_RE.search(t):
+            out.append(t)
+    return out
+
+
+def quark_junk_rows(root):
+    """badge 行（画质角标）：用来做垃圾词扫描的补充集合。"""
+    out = []
+    for it in nodes(root):
+        t = it["text"]
+        if not t:
+            continue
+        if " · " in t and re.search(r"4K|1080|高码|60F|60帧|HDR|DV|EP?\d+|集", t):
             out.append(t)
     return out
 
@@ -195,21 +212,26 @@ def step_tabs_and_cards():
     capture("02_quark_tab")
     assert not (find(root, "暂无数据") and not quark_cards(root)), "夸克 tab 空列表"
 
-    # 采集两屏卡片（标题行 + 日期行都收集）
+    # 采集两屏卡片（标题行 + badge 行 + 日期行都收集，分别校验）
     seen_titles = []
+    seen_badges = []
     dates_seq = []
     for _ in range(5):
         for t in quark_cards(root):
             if t not in seen_titles:
                 seen_titles.append(t)
+        for t in quark_junk_rows(root):
+            if t not in seen_badges:
+                seen_badges.append(t)
         dates_seq.extend(quark_card_dates(root))
         sh("input", "swipe", "540", "1700", "540", "600", "350")
         time.sleep(1.2)
         root = dump_xml()
     cards = seen_titles
     assert len(cards) >= 10, f"夸克 tab 卡片不足 10 条（实际 {len(cards)}）"
+    rows_for_junk = cards + seen_badges
 
-    bad = [t for t in cards if any(k in t for k in JUNK)]
+    bad = [t for t in rows_for_junk if any(k in t for k in JUNK)]
     assert not bad, f"出现垃圾条目: {bad[:4]}"
 
     # 日期行存在且按倒序（「11月24日更新」排在「11月21日更新」前）
@@ -220,24 +242,30 @@ def step_tabs_and_cards():
     print("  日期序列:", dates_seq[:12])
     print("  采样:", cards[:6])
 
-    # 点第一条进详情页
+    # 点第一条标题卡片进详情页：回到列表顶部重新定位（此时 cards[0] 一定可见）
+    for _ in range(4):
+        sh("input", "swipe", "540", "500", "540", "1900", "350")
+        time.sleep(0.8)
     root = dump_xml()
-    first = find(root, cards[0].split("  ")[0][:12])
+    first = None
+    probe = cards[0]
+    # 标题可能被 UI 截断（单行 ellipsize），用前 10 个字符做部分匹配
+    first = find(root, probe[:10])
     if not first:
-        # 回到顶部再找
-        for _ in range(4):
-            sh("input", "swipe", "540", "600", "540", "1700", "350")
-            time.sleep(0.8)
-        root = dump_xml()
-        first = find(root, cards[0][:12])
-    assert first, "找不到第一条卡片可点击元素"
+        # 找不到就扫当前可见的标题行点第一个
+        visible = quark_cards(root)
+        assert visible, "列表回顶后没有可见卡片"
+        probe = visible[0]
+        first = find(root, probe[:10])
+    assert first, f"找不到第一条卡片可点击元素（probe={probe[:16]}）"
     sh("input", "tap", str(first["cx"]), str(first["cy"]))
     time.sleep(6)
     root = close_popups(dump_xml())
     capture("03_detail")
-    # 详情页标题非空（转存结果或加载中都会带顶部标题）
-    titles = [t for t in texts(root) if len(t) >= 4 and "夸克" in (t + "夸克")]
-    assert find(root, "夸克") or titles, "详情页没有打开"
+    # 详情页打开的判定：出现集列表/播放按钮/「详情」元素，或 Activity 栈进入 MobileDetailActivity
+    cur = sh("dumpsys", "activity", "activities")
+    opened = DETAIL.split("/")[-1] in cur or find(root, "集") or find(root, "详情")
+    assert opened, "详情页没有打开"
 
 
 def main():
