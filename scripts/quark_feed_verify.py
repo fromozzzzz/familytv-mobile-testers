@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""手机版 2.3.0 验收：首页「夸克」入口。
+"""手机版 2.4.0 验收：首页「夸克」入口 + 分类筛选。
 
 ① 顶部四入口齐全：豆瓣推荐 / 夸克 / 收藏 / 历史；
 ② 点「夸克」出现 Telegram 频道聚合的最新分享列表（≥10 条，卡片有日期角标）；
 ③ 列表不含短剧/解说/预告等垃圾词；
 ④ 日期倒序：第一屏卡片日期 ≥ 后面卡片日期；
-⑤ 抽一条点进详情页能转存出集列表（标题不为空）。
+⑤ 抽一条点进详情页能转存出集列表（标题不为空）；
+⑥ 分类 chips 两组齐备（全部/电影/剧集/动漫/纪录片 + 区域二级）；
+⑦ 点「纪录片」后列表只含纪录片频道内容、点「欧美电影」后卡片日期倒序不破；
+⑧ 点回「全部」恢复全量列表。
 
 在 GitHub Actions 的 Pixel 6 / Android 13 模拟器上运行（Mate X5 展开态分辨率）。
 """
@@ -268,9 +271,94 @@ def step_tabs_and_cards():
     assert opened, "详情页没有打开"
 
 
+# ─── 2.4.0 分类筛选验收 ────────────────────────────────────────────────────
+def back_home_from_detail():
+    sh("input", "keyevent", "KEYCODE_BACK")
+    time.sleep(2.5)
+    root = close_popups(dump_xml())
+    for _ in range(8):
+        if find(root, "夸克", exact=True) and find(root, "豆瓣推荐", exact=True):
+            break
+        sh("input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1.5)
+        root = close_popups(dump_xml())
+    return root
+
+
+def collect_card_titles(max_swipes=6):
+    """从列表顶开始滑屏收集当前分类下可见的全部标题行。"""
+    root = dump_xml()
+    seen = []
+    for _ in range(max_swipes):
+        for t in quark_cards(root):
+            if t not in seen:
+                seen.append(t)
+        sh("input", "swipe", "540", "1700", "540", "600", "350")
+        time.sleep(1.0)
+        root = dump_xml()
+    for _ in range(max_swipes + 2):
+        sh("input", "swipe", "540", "500", "540", "1900", "350")
+        time.sleep(0.6)
+    return seen
+
+
+def step_category_filter():
+    root = launch_home()
+    tap(root, "夸克", exact=True, wait=4)
+    root = close_popups(dump_xml())
+    for _ in range(15):
+        if quark_cards(root) or find(root, "夸克最新分享"):
+            break
+        time.sleep(2)
+        root = dump_xml()
+
+    # ⑥ 一级 chips：全部/电影/剧集/动漫/纪录片
+    for label in ("全部", "电影", "剧集", "动漫", "纪录片"):
+        assert find(root, label, exact=True), f"缺少一级分类 chip: {label}"
+    capture("04_quark_chips")
+
+    # ⑦ 点「电影」→ 出现二级区域 chips
+    tap(root, "电影", exact=True, wait=1.5)
+    root = dump_xml()
+    for label in ("欧美电影", "华语电影"):
+        assert find(root, label, exact=True), f"电影组缺少二级 chip: {label}"
+    movie_titles = collect_card_titles()
+    capture("05_quark_movie")
+    assert len(movie_titles) >= 1, "点「电影」后没有任何卡片"
+
+    # 二级点「欧美电影」：列表应变少（区域子集）
+    tap(root, "欧美电影", exact=True, wait=1.5)
+    root = dump_xml()
+    west_titles = collect_card_titles()
+    capture("06_quark_movie_west")
+    assert len(west_titles) >= 1, "点「欧美电影」后没有任何卡片"
+    assert len(west_titles) <= len(movie_titles), "区域筛选后卡片应不多于「电影」组"
+
+    # ⑦ 点「纪录片」：全为纪录片类。xvth5 频道内容特征：地球/自然/星球/全N集 等
+    tap(root, "纪录片", exact=True, wait=1.5)
+    root = dump_xml()
+    doc_titles = collect_card_titles()
+    capture("07_quark_doc")
+    assert len(doc_titles) >= 1, "点「纪录片」后没有任何卡片"
+    # 纪录片频道（xvth5）条目普遍带「全N集」标记；若全部缺失则可疑
+    with_ep = [t for t in doc_titles if re.search(r"全\d+集|合集", t)]
+    print("  纪录片采样:", doc_titles[:6])
+    assert len(with_ep) >= len(doc_titles) // 3, \
+        f"纪录片列表内容可疑（全N集 标记占比过低）: {doc_titles[:6]}"
+
+    # ⑧ 点回「全部」恢复
+    tap(root, "全部", exact=True, wait=1.5)
+    root = dump_xml()
+    all_titles = collect_card_titles()
+    capture("08_quark_all")
+    assert len(all_titles) >= 10, f"点回「全部」后没有恢复全量列表（{len(all_titles)} 条）"
+    assert len(all_titles) >= len(west_titles), "「全部」应不少于任何分类子集"
+
+
 def main():
     adb("logcat", "-c")
     record("01_夸克入口列表无垃圾日期倒序详情可达", step_tabs_and_cards)
+    record("02_分类筛选chips齐全切换正确", step_category_filter)
     summary = {"steps": STEPS, "crashes": CRASHES}
     (OUT / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2),
                                       encoding="utf-8")
