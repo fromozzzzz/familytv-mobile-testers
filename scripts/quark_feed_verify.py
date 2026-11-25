@@ -139,15 +139,38 @@ def launch_home():
 
 
 DATE_RE = re.compile(r"2026-\d{2}-\d{2}")
+# 卡片上的日期行形如「11月24日更新」（App 渲染 last=2026-11-24 → 11月24日更新）
+CARD_DATE_RE = re.compile(r"^(\d{2})月(\d{2})日更新$")
+# 顶部框里的「2026」干扰行排除：卡片标题含年份括号 (2026)
+TITLE_HINT_RE = re.compile(r"\((?:19|20)\d{2}\)|4K|高码|更新至|更至|EP\d+|第\d+集|\d+集")
 
 
 def quark_cards(root):
-    """屏幕上可见的夸克 tab 卡片文本（RecyclerView 里且带 2026-xx-xx 日期的行）。"""
+    """屏幕上可见的夸克 tab 卡片标题行（像片名、带年份/画质字样）。"""
     out = []
     for it in nodes(root):
         t = it["text"]
-        if t and DATE_RE.search(t):
+        if not t or len(t) < 6:
+            continue
+        if t in ("豆瓣推荐", "夸克", "收藏", "历史", "搜片", "家庭影视", "电影", "剧集", "动漫综艺"):
+            continue
+        if DATE_RE.search(t):
+            continue
+        if CARD_DATE_RE.match(t):
+            continue
+        if TITLE_HINT_RE.search(t):
             out.append(t)
+    return out
+
+
+def quark_card_dates(root):
+    """屏幕上可见的「N月N日更新」日期行 → 转成 MM-DD 字符串列表（按屏幕顺序）。"""
+    out = []
+    for it in nodes(root):
+        t = it["text"]
+        m = CARD_DATE_RE.match(t or "")
+        if m:
+            out.append(f"{m.group(1)}-{m.group(2)}")
     return out
 
 
@@ -172,31 +195,29 @@ def step_tabs_and_cards():
     capture("02_quark_tab")
     assert not (find(root, "暂无数据") and not quark_cards(root)), "夸克 tab 空列表"
 
-    # 采集两屏卡片
-    seen = []
+    # 采集两屏卡片（标题行 + 日期行都收集）
+    seen_titles = []
+    dates_seq = []
     for _ in range(5):
         for t in quark_cards(root):
-            if t not in seen:
-                seen.append(t)
+            if t not in seen_titles:
+                seen_titles.append(t)
+        dates_seq.extend(quark_card_dates(root))
         sh("input", "swipe", "540", "1700", "540", "600", "350")
         time.sleep(1.2)
         root = dump_xml()
-    cards = [t for t in seen if len(t) >= 6 and not t.startswith("2026")]
+    cards = seen_titles
     assert len(cards) >= 10, f"夸克 tab 卡片不足 10 条（实际 {len(cards)}）"
 
     bad = [t for t in cards if any(k in t for k in JUNK)]
     assert not bad, f"出现垃圾条目: {bad[:4]}"
 
-    # 日期倒序验证
-    dates_in_order = []
-    for t in seen:
-        m = DATE_RE.search(t)
-        if m:
-            dates_in_order.append(m.group(0))
-    if len(dates_in_order) >= 2:
-        for i in range(len(dates_in_order) - 1):
-            assert dates_in_order[i] >= dates_in_order[i + 1], \
-                f"日期未按倒序: {dates_in_order[i]} < {dates_in_order[i+1]}"
+    # 日期行存在且按倒序（「11月24日更新」排在「11月21日更新」前）
+    assert dates_seq, "卡片上没有显示日期行（『N月N日更新』缺失）"
+    for i in range(len(dates_seq) - 1):
+        assert dates_seq[i] >= dates_seq[i + 1], \
+            f"日期未按倒序: {dates_seq[i]} < {dates_seq[i+1]}"
+    print("  日期序列:", dates_seq[:12])
     print("  采样:", cards[:6])
 
     # 点第一条进详情页
