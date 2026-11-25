@@ -1,0 +1,42 @@
+name: Quark Home Tab E2E (FamilyTV Mobile)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  quark-tab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+
+      - name: Quark tab (Mate X5 unfolded metrics)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -o pipefail
+            adb shell wm size 2224x2496
+            adb shell wm density 426
+            curl -fsSL --retry 3 -o app.apk https://paseo.uniai.ccwu.cc/tvbox/FamilyTV-Mobile-test.apk
+            adb install -r -g app.apk
+            python3 scripts/quark_feed_verify.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quark-tab-results
+          path: quark_tab_results/
+          retention-days: 7
